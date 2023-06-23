@@ -9,13 +9,13 @@ extern void nrf24l01_unselect(); /* end SPI transaction : drive CS pin high */
 extern void nrf24l01_enable(); /* drive CE pin high */
 extern void nrf24l01_disable(); /* drive CE pin low */
 extern uint8_t nrf24l01_spi_transfer(uint8_t);
-extern void nrf24l01_delay(unsigned int);
+extern int nrf24l01_get_time(); /* returns time in whatever unit. Used for timeout in nrf24l01_transmit().
 /* User provided constant */
 extern const size_t nrf24l01_payload_length;
 
 /* Exported library functions ********************************************** */
 int nrf24l01_simple_tx_mode(uint8_t channel, const uint8_t *address);
-int nrf24l01_transmit(const uint8_t *data);
+int nrf24l01_transmit(const uint8_t *data, int timeout);
 int nrf24l01_simple_rx_mode(uint8_t channel, const uint8_t *address);
 int nrf24l01_data_available();
 void nrf24l01_receive(uint8_t *data);
@@ -115,17 +115,15 @@ int nrf24l01_simple_tx_mode(uint8_t channel, const uint8_t *address) {
   return 1;
 }
 
-int nrf24l01_transmit(const uint8_t *data) {
+int nrf24l01_transmit(const uint8_t *data, int timeout) {
   nrf24l01_select();
   nrf24l01_spi_transfer(W_TX_PAYLOAD);
   for(int i = 0; i < nrf24l01_payload_length; i++)
     nrf24l01_spi_transfer(data[i]);
   nrf24l01_unselect();
-  //nrf24l01_delay(1); /* TODO: avoid using a delay ************************** */
   uint8_t status = nrf24l01_read_reg(STATUS);
-  auto timestamp = micros();
-  while(!((status = nrf24l01_read_reg(STATUS)) & (1 << 5)) && micros() - timestamp < 10000);
-  Serial.printf("STATUS: 0x%x\n", status);
+  int timestamp = nrf24l01_get_time();
+  while(!((status = nrf24l01_read_reg(STATUS)) & (1 << 5)) && nrf24l01_get_time() - timestamp < timeout);
   if(status & (1 << 5)) {
     nrf24l01_write_reg(STATUS, status); /* clear TX_DS flag */
     return 1;
@@ -174,49 +172,51 @@ void nrf24l01_receive(uint8_t *data) {
   nrf24l01_write_reg(STATUS, 1<<6); /* Clear RX_DR flag */
 }
 
+#ifdef DEBUG
 void nrf24l01_dump() {
-  Serial.println("\n* Dump **********");
-  Serial.println("CONFIG");
+  DEBUG("\n* Dump **********\n");
+  DEBUG("CONFIG\n");
   uint8_t config = nrf24l01_read_reg(CONFIG);
-  Serial.printf("    CONFIG = 0x%x\n", config);
-  Serial.printf("    EN_CRC: %d\n", !!(config&(1<<3)));
-  Serial.printf("    CRCO: %d\n", !!(config&(1<<2)));
-  Serial.printf("    PWR_UP: %d\n", !!(config&(1<<1)));
-  Serial.printf("    PRIM_RX: %d\n", !!(config&(1<<0)));
-  Serial.printf("EN_AA: 0x%x\n", nrf24l01_read_reg(EN_AA));
+  DEBUG("    CONFIG = 0x%x\n", config);
+  DEBUG("    EN_CRC: %d\n", !!(config&(1<<3)));
+  DEBUG("    CRCO: %d\n", !!(config&(1<<2)));
+  DEBUG("    PWR_UP: %d\n", !!(config&(1<<1)));
+  DEBUG("    PRIM_RX: %d\n", !!(config&(1<<0)));
+  DEBUG("EN_AA: 0x%x\n", nrf24l01_read_reg(EN_AA));
   Serial.println("SETUP_AW");
   if(nrf24l01_read_reg(SETUP_AW) == 0x3)
     Serial.println("    5 bytes addresses");
   else Serial.println("    unexpected address length");
-  Serial.printf("SETUP_RETR: 0x%x\n", nrf24l01_read_reg(SETUP_RETR));
-  Serial.printf("RF_CH: %d\n", nrf24l01_read_reg(RF_CH));
-  Serial.printf("RF_SETUP: 0x%x\n", nrf24l01_read_reg(RF_SETUP));
+  DEBUG("SETUP_RETR: 0x%x\n", nrf24l01_read_reg(SETUP_RETR));
+  DEBUG("RF_CH: %d\n", nrf24l01_read_reg(RF_CH));
+  DEBUG("RF_SETUP: 0x%x\n", nrf24l01_read_reg(RF_SETUP));
   uint8_t status = nrf24l01_read_reg(STATUS);
-  Serial.printf("STATUS: 0x%x\n", status);
-  Serial.printf("    TX_DR: %d\n", !!(status&(1<<6)));
-  Serial.printf("    TX_DS: %d\n", !!(status&(1<<5)));
-  Serial.printf("    TX_FULL: %d\n", !!(status&(1<<0)));
+  DEBUG("STATUS: 0x%x\n", status);
+  DEBUG("    TX_DR: %d\n", !!(status&(1<<6)));
+  DEBUG("    TX_DS: %d\n", !!(status&(1<<5)));
+  DEBUG("    TX_FULL: %d\n", !!(status&(1<<0)));
   uint8_t rx_addr_p1[5];
   nrf24l01_read_reg_multi(RX_ADDR_P1, rx_addr_p1, 5);
   Serial.println("RX_ADDR_P1");
-  Serial.printf("    ");
+  DEBUG("    ");
   for(int i = 0; i < 5; i++)
-    Serial.printf("0x%x ", rx_addr_p1[i]);
+    DEBUG("0x%x ", rx_addr_p1[i]);
   Serial.println();
   uint8_t tx_addr[5];
   nrf24l01_read_reg_multi(TX_ADDR, tx_addr, 5);
   Serial.println("TX_ADDR");
   for(int i = 0; i < 5; i++)
-    Serial.printf("0x%x ", tx_addr[i]);
+    DEBUG("0x%x ", tx_addr[i]);
   Serial.println();
   uint8_t fifo_status = nrf24l01_read_reg(FIFO_STATUS);
-  Serial.printf("FIFO_STATUS: 0x%x\n", fifo_status);
-  Serial.printf("    TX_REUSE: %d\n", !!(fifo_status&(1<<6)));
-  Serial.printf("    TX_FULL: %d\n", !!(fifo_status&(1<<5)));
-  Serial.printf("    TX_EMPTY: %d\n", !!(fifo_status&(1<<4)));
-  Serial.printf("    RX_FULL: %d\n", !!(fifo_status&(1<<1)));
-  Serial.printf("    RX_EMPTY: %d\n", !!(fifo_status&(1<<0)));
+  DEBUG("FIFO_STATUS: 0x%x\n", fifo_status);
+  DEBUG("    TX_REUSE: %d\n", !!(fifo_status&(1<<6)));
+  DEBUG("    TX_FULL: %d\n", !!(fifo_status&(1<<5)));
+  DEBUG("    TX_EMPTY: %d\n", !!(fifo_status&(1<<4)));
+  DEBUG("    RX_FULL: %d\n", !!(fifo_status&(1<<1)));
+  DEBUG("    RX_EMPTY: %d\n", !!(fifo_status&(1<<0)));
 }
+#endif /* DEBUG */
 
 #endif /* NRF24L01_IMPLEMENTATION */
 #endif /* INCLUDE_NRF24l01_H */

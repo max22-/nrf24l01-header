@@ -1,4 +1,5 @@
 #include <SPI.h>
+#define DEBUG(...) Serial.printf(__VA_ARGS__)
 #define NRF24L01_IMPLEMENTATION
 #include "nrf24l01.h"
 
@@ -67,7 +68,7 @@ void transmit() {
   for(int i = 0; i < nrf24l01_payload_length; i++)
     buffer[i] = i;
   Serial.print("transmitting buffer: ");
-  if(nrf24l01_transmit(buffer))
+  if(nrf24l01_transmit(buffer, 10000))
     Serial.println("ok");
   else
     Serial.println("failed");
@@ -92,8 +93,8 @@ uint8_t nrf24l01_spi_transfer(uint8_t data) {
   return SPI.transfer(data);
 }
 
-void nrf24l01_delay(unsigned int ms) {
-  delay(ms);
+int nrf24l01_get_time() {
+  return micros();
 }
 /* User provided constant */
 const size_t nrf24l01_payload_length = 32;
